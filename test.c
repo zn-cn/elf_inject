@@ -2,6 +2,6 @@
 
 int main()
 {
-    printf("hhhhh\n");
+    printf("This is the program, whick will be injected.\n");
     return 0;
 }
