@@ -12,6 +12,8 @@
 
 // 计算新的地址，如：数据段地址，跳转地址等
 void cal_addr(int value, int arr[]);
+// 判断是否是一个 ELF 文件
+int is_elf(Elf64_Ehdr elf_ehdr);
 // 注入函数
 void inject(char *elf_file);
 // 插入函数
@@ -29,6 +31,7 @@ void cal_addr(int value, int arr[])
     arr[1] = b2;
     arr[2] = a2;
 }
+
 // 判断是否是一个 ELF 文件
 int is_elf(Elf64_Ehdr elf_ehdr)
 {
@@ -39,7 +42,7 @@ int is_elf(Elf64_Ehdr elf_ehdr)
         return 1; // 相等时则是
 }
 
-//Infector Function
+// 插入函数
 void inject(char *elf_file)
 {
     printf("开始注入\n");
@@ -142,6 +145,7 @@ void inject(char *elf_file)
     insert(elf_ehdr, old_file, old_entry, old_phsize);
 }
 
+// 插入
 void insert(Elf64_Ehdr elf_ehdr, int old_file, int old_entry, int old_phsize)
 {
     // 程序的原始入口地址
@@ -205,6 +209,7 @@ void insert(Elf64_Ehdr elf_ehdr, int old_file, int old_entry, int old_phsize)
     write(old_file, tmp, PAGESIZE - inject_size);
     write(old_file, data, file_stat.st_size - old_phsize);
     free(data);
+    printf("注入完成\n");
 }
 
 int main(int argc, char **argv)
