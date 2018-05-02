@@ -11,7 +11,7 @@
 #define PAGESIZE 4096
 
 // 计算新的地址，如：数据段地址，跳转地址等
-void cal_addr(int value, int arr[]);
+void cal_addr(int entry, int addr[]);
 // 判断是否是一个 ELF 文件
 int is_elf(Elf64_Ehdr elf_ehdr);
 // 注入函数
@@ -20,16 +20,14 @@ void inject(char *elf_file);
 void insert(Elf64_Ehdr elf_ehdr, int old_file, int old_entry, int old_phsize);
 
 // 计算新的地址
-void cal_addr(int value, int arr[])
+void cal_addr(int entry, int addr[])
 {
-    int a = value / (16 * 16);
-    int b = value % (16 * 16);
-    int a2 = a / (16 * 16);
-    int b2 = a % (16 * 16);
-
-    arr[0] = b;
-    arr[1] = b2;
-    arr[2] = a2;
+    int temp = entry;
+    for (int i = 0; i < 4; i++)
+    {
+        addr[i] = temp % 256; // 256 == 8byte
+        temp /= 256;
+    }
 }
 
 // 判断是否是一个 ELF 文件
@@ -149,12 +147,12 @@ void inject(char *elf_file)
 void insert(Elf64_Ehdr elf_ehdr, int old_file, int old_entry, int old_phsize)
 {
     // 程序的原始入口地址
-    int old_entry_addr[3];
+    int old_entry_addr[4];
     cal_addr(old_entry, old_entry_addr);
 
     // 数据段的地址, 73 为数组中程序数据段的相对位置
     int data_entry = elf_ehdr.e_entry + 73;
-    int data_addr[3];
+    int data_addr[4];
     cal_addr(data_entry, data_addr);
 
     // 每一行对应一条汇编代码
@@ -165,23 +163,23 @@ void insert(Elf64_Ehdr elf_ehdr, int old_file, int old_entry, int old_phsize)
         0x52,                                     // push   %rdx
         0x48, 0xc7, 0xc0, 0x08, 0x00, 0x00, 0x00, // mov    $0x8,%rax
         // 由于注入之后数据段的地址修改了，故此处需要自行计算新的地址
-        0x48, 0xc7, 0xc3, data_addr[0], data_addr[1], data_addr[2], 0x00, // mov    $0x0,%rbx
-        0x48, 0xc7, 0xc1, 0xa4, 0x01, 0x00, 0x00,                         // mov    $0x1a4,%rcx
-        0xcd, 0x80,                                                       // int    $0x80
-        0x48, 0x89, 0xc3,                                                 // mov    %rax,%rbx
-        0x48, 0xc7, 0xc0, 0x04, 0x00, 0x00, 0x00,                         // mov    $0x4,%rax
+        0x48, 0xc7, 0xc3, data_addr[0], data_addr[1], data_addr[2], data_addr[3], // mov    $0x0,%rbx
+        0x48, 0xc7, 0xc1, 0xa4, 0x01, 0x00, 0x00,                                 // mov    $0x1a4,%rcx
+        0xcd, 0x80,                                                               // int    $0x80
+        0x48, 0x89, 0xc3,                                                         // mov    %rax,%rbx
+        0x48, 0xc7, 0xc0, 0x04, 0x00, 0x00, 0x00,                                 // mov    $0x4,%rax
         // 由于注入之后数据段的地址修改了，故此处需要自行计算新的地址
-        0x48, 0xc7, 0xc1, data_addr[0], data_addr[1], data_addr[2], 0x00, // mov    $0x0,%rcx
-        0x48, 0xc7, 0xc2, 0x0a, 0x00, 0x00, 0x00,                         // mov    $0xa,%rdx
-        0xcd, 0x80,                                                       // int    $0x80
-        0x48, 0xc7, 0xc0, 0x06, 0x00, 0x00, 0x00,                         // mov    $0x6,%rax
-        0xcd, 0x80,                                                       // int    $0x80
-        0x5a,                                                             // pop    %rdx
-        0x59,                                                             // pop    %rcx
-        0x5b,                                                             // pop    %rbx
-        0x58,                                                             // pop    %rax
+        0x48, 0xc7, 0xc1, data_addr[0], data_addr[1], data_addr[2], data_addr[3], // mov    $0x0,%rcx
+        0x48, 0xc7, 0xc2, 0x0a, 0x00, 0x00, 0x00,                                 // mov    $0xa,%rdx
+        0xcd, 0x80,                                                               // int    $0x80
+        0x48, 0xc7, 0xc0, 0x06, 0x00, 0x00, 0x00,                                 // mov    $0x6,%rax
+        0xcd, 0x80,                                                               // int    $0x80
+        0x5a,                                                                     // pop    %rdx
+        0x59,                                                                     // pop    %rcx
+        0x5b,                                                                     // pop    %rbx
+        0x58,                                                                     // pop    %rax
         // 此处在原来的汇编程序中为程序中断指令，修改为跳转到原入口地址elfh.e_entry
-        0xbd, old_entry_addr[0], old_entry_addr[1], old_entry_addr[2], 0x00, 0xff, 0xe5,
+        0xbd, old_entry_addr[0], old_entry_addr[1], old_entry_addr[2], old_entry_addr[3], 0xff, 0xe5,
         //数据区域 helloworld
         0x68, 0x65, 0x6c, 0x6c, 0x6f,
         0x77, 0x6f,
