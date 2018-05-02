@@ -1,4 +1,4 @@
-# elf文件注入
+# elf 文件注入
 
 操作系统大作业
 
@@ -10,11 +10,12 @@
 
 #### 测试用例介绍：
 
-本elf注入的功能是在elf文件执行前，生成hhhhh文件并写入内容：hhhhh，之后再执行原elf文件功能
+本elf注入的功能是在elf文件执行前，生成helloworld文件并写入内容：helloworld，之后再执行原elf文件功能
 
 ```
 gcc main.c -o main  # 生成注入函数
-gcc test.c -o test  # 生成测试elf文件，功能打印 hhhhh
+# 测试文件功能：打印 This is the program, whick will be injected.\n
+gcc test.c -o test  # 生成测试elf文件
 ./main test   # elf注入
 ./test  # 执行注入后的elf文件
 ```
@@ -23,30 +24,37 @@ gcc test.c -o test  # 生成测试elf文件，功能打印 hhhhh
 
 + 首先书写汇编代码：
 
-  功能：生成hhhhh文件并写入内容：hhhhh
+  功能：生成helloworld文件并写入内容：helloworld
 
-  文件名：hhhhh.s
+  参考：
 
-  ```
+  + [IBM Linux汇编语言开发指南](https://www.ibm.com/developerworks/cn/linux/l-assembly/index.html) 
+  + [汇编学习-使用文件](https://my.oschina.net/u/2537915/blog/700886) 
+  + [linux 系统调用号表](https://blog.csdn.net/qq_29343201/article/details/52209588) 
+
+  注：此处为64位环境，采用 AT&T 格式，若为32位环境，请改用eax, ebx 等
+
+  ```asm
+  # helloworld.s
   .text
   .global main
   .type main, @function
 
   main:
-    pushq %rax
+    pushq %rax       # 现场保存，先入栈，后出栈
     pushq %rbx
     pushq %rcx
     pushq %rdx
 
-    movq $8, %rax
-    movq $.L, %rbx
+    movq $8, %rax    # 系统调用号(sys_create)  创建文件
+    movq $content, %rbx
     mov $00644,%rcx
     int $0x80
 
     movq %rax, %rbx
-    movq $4, %rax
-    movq $.L, %rcx
-    movq $5,%rdx
+    movq $4, %rax    # 系统调用号(sys_write)  写入文件
+    movq $content, %rcx
+    movq $10, %rdx   # 10为字符串的大小
 
     int $0x80
 
@@ -61,14 +69,14 @@ gcc test.c -o test  # 生成测试elf文件，功能打印 hhhhh
     movq $1,%rax
     mov $0, %rbx
     int $0x80
-  .L:
-    .string "hhhhh"
+  content:
+    .string "helloworld"
   ```
 
 + 编译为 .o 二进制文件
 
   ```
-  gcc -c hhhhh.s # 默认生成 hhhhh.o
+  gcc -c helloworld.s # 默认生成 helloworld.o
   ```
 
 + 反编译
@@ -77,19 +85,19 @@ gcc test.c -o test  # 生成测试elf文件，功能打印 hhhhh
   objdump -s -d hhhhh.o > hhhhh.o.txt
   ```
 
-  文件：hhhhh.o.txt
+  文件：helloworld.o.txt
 
-  ```
+  ```assembly
 
-  write2.o：     文件格式 elf64-x86-64
+  helloworld.o：     文件格式 elf64-x86-64
 
   Contents of section .text:
    0000 50535152 48c7c008 00000048 c7c30000  PSQRH......H....
    0010 000048c7 c1a40100 00cd8048 89c348c7  ..H........H..H.
-   0020 c0040000 0048c7c3 00000000 48c7c205  .....H......H...
+   0020 c0040000 0048c7c1 00000000 48c7c20a  .....H......H...
    0030 000000cd 8048c7c0 06000000 cd805a59  .....H........ZY
    0040 5b5848c7 c0010000 0048c7c3 00000000  [XH......H......
-   0050 cd806868 68686800                    ..hhhhh.        
+   0050 cd806865 6c6c6f77 6f726c64 00        ..helloworld.   
 
   Disassembly of section .text:
 
@@ -104,8 +112,8 @@ gcc test.c -o test  # 生成测试elf文件，功能打印 hhhhh
     19:	cd 80                	int    $0x80
     1b:	48 89 c3             	mov    %rax,%rbx
     1e:	48 c7 c0 04 00 00 00 	mov    $0x4,%rax
-    25:	48 c7 c3 00 00 00 00 	mov    $0x0,%rbx
-    2c:	48 c7 c2 05 00 00 00 	mov    $0x5,%rdx
+    25:	48 c7 c1 00 00 00 00 	mov    $0x0,%rcx
+    2c:	48 c7 c2 0a 00 00 00 	mov    $0xa,%rdx
     33:	cd 80                	int    $0x80
     35:	48 c7 c0 06 00 00 00 	mov    $0x6,%rax
     3c:	cd 80                	int    $0x80
@@ -116,9 +124,13 @@ gcc test.c -o test  # 生成测试elf文件，功能打印 hhhhh
     42:	48 c7 c0 01 00 00 00 	mov    $0x1,%rax
     49:	48 c7 c3 00 00 00 00 	mov    $0x0,%rbx
     50:	cd 80                	int    $0x80
-    52:	68 68 68 68 68       	pushq  $0x68686868
-  	...
 
+  0000000000000052 <content>:
+    52:	68 65 6c 6c 6f       	pushq  $0x6f6c6c65
+    57:	77 6f                	ja     c8 <content+0x76>
+    59:	72 6c                	jb     c7 <content+0x75>
+    5b:	64                   	fs
+  	...
   ```
 
 + 选取其中十六进制的数字作为 main.c 中变量 inject_data
@@ -140,7 +152,7 @@ gcc test.c -o test  # 生成测试elf文件，功能打印 hhhhh
           0x48, 0xc7, 0xc0, 0x04, 0x00, 0x00, 0x00,
           // 由于注入之后数据段的地址修改了，故此处需要自行计算新的地址，具体请参见代码
           0x48, 0xc7, 0xc1, new_addr[0], new_addr[1], new_addr[2], 0x00,
-          0x48, 0xc7, 0xc2, 0x05, 0x00, 0x00, 0x00,
+          0x48, 0xc7, 0xc2, 0x0a, 0x00, 0x00, 0x00,
           0xcd, 0x80,
           0x48, 0xc7, 0xc0, 0x06, 0x00, 0x00, 0x00,
           0xcd, 0x80,
@@ -152,8 +164,12 @@ gcc test.c -o test  # 生成测试elf文件，功能打印 hhhhh
           // 此处在原来的汇编程序中为程序中断指令，修改为跳转到原入口地址elfh.e_entry 
           0xbd, ori_addr[0], ori_addr[1], ori_addr[2], 0x00, 0xff, 0xe5,
           
-          0x68, 0x68, 0x68, 0x68, 0x68, 0x00
-
+          //数据区域 helloworld
+          0x68, 0x65, 0x6c, 0x6c, 0x6f,
+          0x77, 0x6f,
+          0x72, 0x6c,
+          0x64,
+          0x00
       };
   ```
 

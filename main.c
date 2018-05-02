@@ -42,7 +42,7 @@ int is_elf(Elf64_Ehdr elf_ehdr)
         return 1; // 相等时则是
 }
 
-// 插入函数
+// 注入函数
 void inject(char *elf_file)
 {
     printf("开始注入\n");
@@ -159,29 +159,35 @@ void insert(Elf64_Ehdr elf_ehdr, int old_file, int old_entry, int old_phsize)
 
     // 每一行对应一条汇编代码
     char inject_code[] = {
-        0x50,
-        0x53,
-        0x51,
-        0x52,
-        0x48, 0xc7, 0xc0, 0x08, 0x00, 0x00, 0x00,
-        0x48, 0xc7, 0xc3, data_addr[0], data_addr[1], data_addr[2], 0x00,
-        0x48, 0xc7, 0xc1, 0xa4, 0x01, 0x00, 0x00,
-        0xcd, 0x80,
-        0x48, 0x89, 0xc3,
-        0x48, 0xc7, 0xc0, 0x04, 0x00, 0x00, 0x00,
-        0x48, 0xc7, 0xc1, data_addr[0], data_addr[1], data_addr[2], 0x00,
-        0x48, 0xc7, 0xc2, 0x05, 0x00, 0x00, 0x00,
-        0xcd, 0x80,
-        0x48, 0xc7, 0xc0, 0x06, 0x00, 0x00, 0x00,
-        0xcd, 0x80,
-        0x5a,
-        0x59,
-        0x5b,
-        0x58,
-        //跳转指令 "movl Oldentry, %eax"
+        0x50,                                     // push   %rax
+        0x53,                                     // push   %rbx
+        0x51,                                     // push   %rcx
+        0x52,                                     // push   %rdx
+        0x48, 0xc7, 0xc0, 0x08, 0x00, 0x00, 0x00, // mov    $0x8,%rax
+        // 由于注入之后数据段的地址修改了，故此处需要自行计算新的地址
+        0x48, 0xc7, 0xc3, data_addr[0], data_addr[1], data_addr[2], 0x00, // mov    $0x0,%rbx
+        0x48, 0xc7, 0xc1, 0xa4, 0x01, 0x00, 0x00,                         // mov    $0x1a4,%rcx
+        0xcd, 0x80,                                                       // int    $0x80
+        0x48, 0x89, 0xc3,                                                 // mov    %rax,%rbx
+        0x48, 0xc7, 0xc0, 0x04, 0x00, 0x00, 0x00,                         // mov    $0x4,%rax
+        // 由于注入之后数据段的地址修改了，故此处需要自行计算新的地址
+        0x48, 0xc7, 0xc1, data_addr[0], data_addr[1], data_addr[2], 0x00, // mov    $0x0,%rcx
+        0x48, 0xc7, 0xc2, 0x0a, 0x00, 0x00, 0x00,                         // mov    $0xa,%rdx
+        0xcd, 0x80,                                                       // int    $0x80
+        0x48, 0xc7, 0xc0, 0x06, 0x00, 0x00, 0x00,                         // mov    $0x6,%rax
+        0xcd, 0x80,                                                       // int    $0x80
+        0x5a,                                                             // pop    %rdx
+        0x59,                                                             // pop    %rcx
+        0x5b,                                                             // pop    %rbx
+        0x58,                                                             // pop    %rax
+        // 此处在原来的汇编程序中为程序中断指令，修改为跳转到原入口地址elfh.e_entry
         0xbd, old_entry_addr[0], old_entry_addr[1], old_entry_addr[2], 0x00, 0xff, 0xe5,
-        //数据区域 hhhhh
-        0x68, 0x68, 0x68, 0x68, 0x68, 0x00};
+        //数据区域 helloworld
+        0x68, 0x65, 0x6c, 0x6c, 0x6f,
+        0x77, 0x6f,
+        0x72, 0x6c,
+        0x64,
+        0x00};
     int inject_size = sizeof(inject_code);
 
     // 防止注入代码太大

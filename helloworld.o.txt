@@ -1,0 +1,43 @@
+
+helloworld.o：     文件格式 elf64-x86-64
+
+Contents of section .text:
+ 0000 50535152 48c7c008 00000048 c7c30000  PSQRH......H....
+ 0010 000048c7 c1a40100 00cd8048 89c348c7  ..H........H..H.
+ 0020 c0040000 0048c7c1 00000000 48c7c20a  .....H......H...
+ 0030 000000cd 8048c7c0 06000000 cd805a59  .....H........ZY
+ 0040 5b5848c7 c0010000 0048c7c3 00000000  [XH......H......
+ 0050 cd806865 6c6c6f77 6f726c64 00        ..helloworld.   
+
+Disassembly of section .text:
+
+0000000000000000 <main>:
+   0:	50                   	push   %rax
+   1:	53                   	push   %rbx
+   2:	51                   	push   %rcx
+   3:	52                   	push   %rdx
+   4:	48 c7 c0 08 00 00 00 	mov    $0x8,%rax
+   b:	48 c7 c3 00 00 00 00 	mov    $0x0,%rbx
+  12:	48 c7 c1 a4 01 00 00 	mov    $0x1a4,%rcx
+  19:	cd 80                	int    $0x80
+  1b:	48 89 c3             	mov    %rax,%rbx
+  1e:	48 c7 c0 04 00 00 00 	mov    $0x4,%rax
+  25:	48 c7 c1 00 00 00 00 	mov    $0x0,%rcx
+  2c:	48 c7 c2 0a 00 00 00 	mov    $0xa,%rdx
+  33:	cd 80                	int    $0x80
+  35:	48 c7 c0 06 00 00 00 	mov    $0x6,%rax
+  3c:	cd 80                	int    $0x80
+  3e:	5a                   	pop    %rdx
+  3f:	59                   	pop    %rcx
+  40:	5b                   	pop    %rbx
+  41:	58                   	pop    %rax
+  42:	48 c7 c0 01 00 00 00 	mov    $0x1,%rax
+  49:	48 c7 c3 00 00 00 00 	mov    $0x0,%rbx
+  50:	cd 80                	int    $0x80
+
+0000000000000052 <content>:
+  52:	68 65 6c 6c 6f       	pushq  $0x6f6c6c65
+  57:	77 6f                	ja     c8 <content+0x76>
+  59:	72 6c                	jb     c7 <content+0x75>
+  5b:	64                   	fs
+	...
