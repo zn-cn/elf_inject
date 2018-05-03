@@ -207,10 +207,11 @@ void insert(Elf64_Ehdr elf_ehdr, int old_file, int old_entry, int old_phsize)
     lseek(old_file, old_phsize, SEEK_SET);
     write(old_file, inject_code, inject_size);
 
-    char tmp[PAGESIZE] = {0};
     // 扩充到一页
+    char tmp[PAGESIZE] = {0};
     memset(tmp, PAGESIZE - inject_size, 0);
     write(old_file, tmp, PAGESIZE - inject_size);
+    // 再将原始的数据接在注入代码后面插入
     write(old_file, data, file_stat.st_size - old_phsize);
     free(data);
     printf("注入完成\n");

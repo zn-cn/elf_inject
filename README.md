@@ -82,7 +82,7 @@ gcc test.c -o test  # 生成测试elf文件
 + 反编译
 
   ```
-  objdump -s -d hhhhh.o > hhhhh.o.txt
+  objdump -s -d helloworld.o > helloworld.o.txt
   ```
 
   文件：helloworld.o.txt

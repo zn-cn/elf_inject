@@ -18,10 +18,9 @@ main:
   movq $4, %rax    # 系统调用号(sys_write)  写入文件
   movq $content, %rcx
   movq $10, %rdx   # 10为字符串的大小
-
   int $0x80
 
-  movq $6,%rax
+  movq $6,%rax    
   int $0x80
 
   popq %rdx
@@ -29,7 +28,7 @@ main:
   popq %rbx
   popq %rax
 
-  movq $1,%rax
+  movq $1,%rax   # 以下三行将被替换为跳转指令
   mov $0, %rbx
   int $0x80
 content:
