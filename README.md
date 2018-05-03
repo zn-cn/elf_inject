@@ -66,7 +66,7 @@ gcc test.c -o test  # 生成测试elf文件
     popq %rbx
     popq %rax
 
-    movq $1,%rax
+    movq $1,%rax   # 以下三行将被替换为跳转指令
     mov $0, %rbx
     int $0x80
   content:
@@ -133,25 +133,25 @@ gcc test.c -o test  # 生成测试elf文件
   	...
   ```
 
-+ 选取其中十六进制的数字作为 main.c 中变量 inject_data
++ 选取其中十六进制的数字作为 main.c 中变量 inject_code
 
   注意注释
 
   ```
-      char inject_data[] = {
+      char inject_code[] = {
           0x50,
           0x53,
           0x51,
           0x52,
           0x48, 0xc7, 0xc0, 0x08, 0x00, 0x00, 0x00,
           // 由于注入之后数据段的地址修改了，故此处需要自行计算新的地址，具体请参见代码
-          0x48, 0xc7, 0xc3, new_addr[0], new_addr[1], new_addr[2], 0x00,
+          0x48, 0xc7, 0xc3, data_addr[0], data_addr[1], data_addr[2], data_addr[3],
           0x48, 0xc7, 0xc1, 0xa4, 0x01, 0x00, 0x00,
           0xcd, 0x80,
           0x48, 0x89, 0xc3,
           0x48, 0xc7, 0xc0, 0x04, 0x00, 0x00, 0x00,
           // 由于注入之后数据段的地址修改了，故此处需要自行计算新的地址，具体请参见代码
-          0x48, 0xc7, 0xc1, new_addr[0], new_addr[1], new_addr[2], 0x00,
+          0x48, 0xc7, 0xc1, data_addr[0], data_addr[1], data_addr[2], data_addr[3],
           0x48, 0xc7, 0xc2, 0x0a, 0x00, 0x00, 0x00,
           0xcd, 0x80,
           0x48, 0xc7, 0xc0, 0x06, 0x00, 0x00, 0x00,
@@ -162,7 +162,7 @@ gcc test.c -o test  # 生成测试elf文件
           0x58,
           //跳转指令
           // 此处在原来的汇编程序中为程序中断指令，修改为跳转到原入口地址elfh.e_entry 
-          0xbd, ori_addr[0], ori_addr[1], ori_addr[2], 0x00, 0xff, 0xe5,
+          0xbd, old_entry_addr[0], old_entry_addr[1], old_entry_addr[2], old_entry_addr[3], 0xff, 0xe5,
           
           //数据区域 helloworld
           0x68, 0x65, 0x6c, 0x6c, 0x6f,
@@ -173,7 +173,18 @@ gcc test.c -o test  # 生成测试elf文件
       };
   ```
 
-  ​
+
+## 思路
+
+1. 存储相关原始数据，如原文件入口地址
+2. (也可以最后修改)修正 ELF 头部 中的 e_shoff ，增加 PAGESIZE 大小（操作系统页式系统，一页默认4k）
+3. 修正 第一个程序头部表，第一个头部特殊对待，因为要插入自己注入的程序，所以要把第一个头部扩容，把p_filesz 和 p_memsz 增加 PAGESIZE 大小或者 注入程序的大小
+4. 修正 ELF 头部 中的 e_entry ，指向 p_vaddr + p_filesz
+5. 修正程序头部表偏移地址p_offset ，增加 PAGESIZE 大小
+6. 修正节区 sh_offset ，增加 PAGESIZE 大小
+7. 修正注入程序机器码，如：修正数据段存储地址（从新的elfh.e_entry开始计算程序首地址），最后要加上跳转指令，即跳转到原来的e_entry（刚开始记录的）
+8. 首先存储原来目标节区头到末尾的数据，然后插入修正后的注入程序的机器码，之后通过插入0的方式让插入区块扩充到 PAGESIZE （4k）
+9. 再把存储的数据接在后面插入
 
 ## ELF初体验
 
@@ -452,14 +463,3 @@ sh_flags 字段定义了一个节区中包含的内容是否可以修改、是�
 - .liblist
 - .conflict
 - ...
-
-## 思路
-
-1. (也可以最后修改)修正 ELF 头部 中的 e_shoff ，增加 PAGESIZE 大小（操作系统页式系统，一页默认4k）
-2. 修正 ELF 头部 中的 e_entry ，指向 p_vaddr + p_filesz
-3. 修正 第一个程序头部表，第一个头部特殊对待，因为要插入自己注入的程序，所以要把第一个头部扩容，把p_filesz 和 p_memsz 增加 PAGESIZE 大小或者 注入程序的大小
-4. 修正程序头部表偏移地址p_offset ，增加 PAGESIZE 大小
-5. 修正节区 sh_offset ，增加 PAGESIZE 大小
-6. 修正注入程序机器码，如：修正数据段存储地址（从新的elfh.e_entry开始计算程序首地址），最后要加上跳转指令，即跳转到原来的e_entry（刚开始记录的）
-7. 插入修正后的注入程序的机器码
-8. 插入 0 ，让插入区块扩充到 PAGESIZE （4k）

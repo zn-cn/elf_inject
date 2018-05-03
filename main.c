@@ -44,9 +44,9 @@ int is_elf(Elf64_Ehdr elf_ehdr)
 void inject(char *elf_file)
 {
     printf("开始注入\n");
-    int old_entry;
-    int old_shoff;
-    int old_phsize;
+    int old_entry;  // elf 文件的原入口地址
+    int old_shoff;  // elf 文件 节区头部表格的原偏移量
+    int old_phsize; // 节区在文件中的字节数
 
     // ELF Header Table 结构体
     Elf64_Ehdr elf_ehdr;
@@ -66,9 +66,7 @@ void inject(char *elf_file)
         exit(0);
     }
 
-    // elf 文件的原入口地址
     old_entry = elf_ehdr.e_entry;
-    //elf 文件 节区头部表格的原偏移量
     old_shoff = elf_ehdr.e_shoff;
 
     // 节区头部表格的偏移量增加一页
