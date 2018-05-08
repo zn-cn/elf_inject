@@ -97,7 +97,7 @@ ELF Header 中各个字段的说明如表：
 一个实际可执行文件的头文件头部形式如下：
 
 ```
-$greadelf -h hello.so
+$readelf -h hello.so
 ELF 头：
   Magic：  7f 45 4c 46 01 01 01 00 00 00 00 00 00 00 00 00
   类别:                             ELF32
